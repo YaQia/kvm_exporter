@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/Faione/easyxporter"
-	_ "github.com/Faione/resctrl_exporter/collectors"
+	_ "github.com/Faione/kvm_exporter/collectors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
