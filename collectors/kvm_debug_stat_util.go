@@ -11,13 +11,14 @@ import (
 
 type DirMap map[string]string
 
-func (dirMap DirMap) dirPathToLabel(dirPath string) (string, error) {
+func (dirMap DirMap) dirPathToLabel(dirPath string) ([]string, error) {
+
 	if len(dirPath) < len(*kvmDebugDir) {
-		return "", errors.New("invalid dir path")
+		return nil, errors.New("invalid dir path")
 	}
 
 	if dirPath == *kvmDebugDir {
-		return "global", nil
+		return []string{"global"}, nil
 	}
 
 	var paths []string
@@ -35,22 +36,22 @@ func (dirMap DirMap) dirPathToLabel(dirPath string) (string, error) {
 	case 1:
 		spid = paths[0]
 	case 2:
-		spid = paths[1]
 		vcpu = paths[0]
+		spid = paths[1]
 	default:
-		return "", errors.New("out of max depth")
+		return nil, errors.New("out of max depth")
 	}
 
 	vm, ok := dirMap[spid]
 	if !ok {
-		return "", fmt.Errorf("pid %s to vm failed", spid)
+		return nil, fmt.Errorf("pid %s to vm failed", spid)
 	}
 
 	if vcpu != "" {
-		return vm + "_" + vcpu, nil
+		return []string{vm, vcpu[len(vcpu)-1:]}, nil
 	}
 
-	return vm, nil
+	return []string{vm}, nil
 }
 
 type VmInfo struct {

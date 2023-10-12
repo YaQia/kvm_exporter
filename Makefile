@@ -2,8 +2,8 @@ APP = kvm_exporter
 OCI = podman
 
 REPO ?= "ict.acs.edu/infra"
-VERSION ?= 0.0.1
-IMAGE = ${REPO}/${APP}:${VERSION}
+VER ?= 0.0.1
+IMAGE = ${REPO}/${APP}:${VER}
 
 build:
 	@GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \

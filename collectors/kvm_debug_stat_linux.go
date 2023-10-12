@@ -20,15 +20,14 @@ const (
 )
 
 var (
-	depth       = easyxporter.Flags().Int("collector.dir.depth", 2, "KVM Debug Stat Depth")
-	vmMapPath   = easyxporter.Flags().String("collector.vmmap.path", "vm_map.yaml", "VmMap yaml path")
+	depth       = easyxporter.Flags().Int("collector.dir.depth", MAX_DEPTH, "KVM Debug Stat Depth")
+	vmMapPath   = easyxporter.Flags().String("collector.vmmap.path", "/etc/vm.yaml", "VmMap yaml path")
 	kvmDebugDir = easyxporter.Flags().String("collector.kvmdebug.dir", KVM_DEBUG_DIR, "KVM debug stat dir")
 )
 
 type kvmDebugStatCollector struct {
-	logger    *logrus.Logger
-	dynLabels []string
-	vmMap     atomic.Value
+	logger *logrus.Logger
+	vmMap  atomic.Value
 }
 
 func NewKvmDebugStatCollector(logger *logrus.Logger) (easyxporter.Collector, error) {
@@ -51,7 +50,7 @@ func NewKvmDebugStatCollector(logger *logrus.Logger) (easyxporter.Collector, err
 	}
 
 	logger.Debugf("watching kvm debug path: %s", *kvmDebugDir)
-	return &kvmDebugStatCollector{logger: logger, dynLabels: []string{"domain"}, vmMap: atomicVmMap}, nil
+	return &kvmDebugStatCollector{logger: logger, vmMap: atomicVmMap}, nil
 }
 
 func (c *kvmDebugStatCollector) Update(ch chan<- prometheus.Metric) error {
@@ -61,12 +60,13 @@ func (c *kvmDebugStatCollector) Update(ch chan<- prometheus.Metric) error {
 		if err != nil {
 			return err
 		}
+
+		c.logger.Debugf("parsing dir: %s", path)
 		if info.IsDir() {
 			rd := strings.Count(*kvmDebugDir, string(filepath.Separator))
 			d := strings.Count(path, string(filepath.Separator))
 
 			if d-rd > *depth {
-				c.logger.Debugf("skip dir: %s", path)
 				return filepath.SkipDir
 			}
 
@@ -75,30 +75,43 @@ func (c *kvmDebugStatCollector) Update(ch chan<- prometheus.Metric) error {
 
 		bt, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("read file %s failed: %s", path, err)
 		}
 
-		labelDomain, err := dirMap.dirPathToLabel(filepath.Dir(path))
+		labels, err := dirMap.dirPathToLabel(filepath.Dir(path))
 		if err != nil {
-			return err
+			return fmt.Errorf("read label from %s failed: %s", filepath.Dir(path), err)
 		}
 
-		vstr := strings.TrimRight(string(bt), "\n")
+		content := string(bt)
+		if content == "" {
+			return nil
+		}
+
+		vstr := strings.TrimRight(content, "\n")
 		v, err := strconv.Atoi(vstr)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse value from %s failed: %s", path, err)
 		}
 
 		metric := filepath.Base(path)
+		dynLabels := []string{"domain"}
 
-		ch <- prometheus.MustNewConstMetric(prometheus.NewDesc(
-			prometheus.BuildFQName(KVM_DEBUG_STAT, metric, "count"),
-			fmt.Sprintf("%s count from %s", metric, *kvmDebugDir),
-			c.dynLabels, nil,
-		),
+		// in vcpu dir, some filename can not set to metric name
+		if len(labels) == 2 {
+			metric = fmt.Sprintf("vcpu_%s", strings.ReplaceAll(metric, "-", "_"))
+			dynLabels = []string{"domain", "vcpu"}
+		}
+
+		ch <- prometheus.MustNewConstMetric(
+			prometheus.NewDesc(
+				prometheus.BuildFQName(KVM_DEBUG_STAT, metric, "count"),
+				fmt.Sprintf("%s count from %s", metric, *kvmDebugDir),
+				dynLabels, nil,
+			),
 			prometheus.GaugeValue,
 			float64(v),
-			labelDomain,
+			labels...,
 		)
 
 		return nil
