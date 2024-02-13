@@ -1,6 +1,7 @@
 package collectors
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Faione/easyxporter"
+	"github.com/fsnotify/fsnotify"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 )
@@ -30,10 +32,14 @@ type kvmDebugStatCollector struct {
 	vmMap  atomic.Value
 }
 
-func NewKvmDebugStatCollector(logger *logrus.Logger) (easyxporter.Collector, error) {
+func NewKvmDebugStatCollector(logger *logrus.Logger) (easyxporter.AsyncCollector, error) {
 	var atomicVmMap atomic.Value
 
 	if err := checkKVMDebugDir(); err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(*vmMapPath); err != nil {
 		return nil, err
 	}
 
@@ -50,6 +56,7 @@ func NewKvmDebugStatCollector(logger *logrus.Logger) (easyxporter.Collector, err
 	}
 
 	logger.Debugf("watching kvm debug path: %s", *kvmDebugDir)
+
 	return &kvmDebugStatCollector{logger: logger, vmMap: atomicVmMap}, nil
 }
 
@@ -120,6 +127,45 @@ func (c *kvmDebugStatCollector) Update(ch chan<- prometheus.Metric) error {
 	return filepath.Walk(*kvmDebugDir, kvmDirWalkF)
 }
 
+func (c *kvmDebugStatCollector) AsyncCollect(ctx context.Context) error {
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+WATCHER_LOOP:
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return fmt.Errorf("unable to watch %s", *vmMapPath)
+			}
+
+			// write event
+			if event.Op&fsnotify.Write == fsnotify.Write {
+				c.logger.Info("config modified")
+
+				vmMap, err := ReadVmMapFromFile(*vmMapPath)
+				if err != nil {
+					c.logger.Errorf("unable to parse config: %s", err)
+					continue
+				}
+
+				c.vmMap.Store(vmMap)
+			}
+
+		case <-ctx.Done():
+			break WATCHER_LOOP
+
+		}
+
+	}
+
+	return nil
+}
+
 func init() {
-	easyxporter.RegisterCollector(KVM_DEBUG_STAT, true, NewKvmDebugStatCollector)
+	easyxporter.RegisterAsyncCollector(KVM_DEBUG_STAT, true, NewKvmDebugStatCollector)
 }
