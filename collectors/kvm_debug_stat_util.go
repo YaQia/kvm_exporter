@@ -48,7 +48,11 @@ func (dirMap DirMap) dirPathToLabel(dirPath string) ([]string, error) {
 	}
 
 	if vcpu != "" {
-		return []string{vm, vcpu[len(vcpu)-1:]}, nil
+		var vcpu_id string
+		if _, err := fmt.Sscanf(vcpu, "vcpu%v", &vcpu_id); err != nil {
+			return nil, errors.New("parse vcpu id error")
+		}
+		return []string{vm, vcpu_id}, nil
 	}
 
 	return []string{vm}, nil
